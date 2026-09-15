@@ -16,12 +16,55 @@
 
 A self-hosted online file converter. Supports over a thousand different formats. Written with TypeScript, Bun and Elysia.
 
+> [!NOTE]
+> **Fork additions (hermes-gadget): first-class REST API + native MCP endpoint.**
+> This fork adds `/api/v1/*` (JSON/multipart) and a Streamable-HTTP MCP endpoint at `/mcp`,
+> both authenticated with `Authorization: Bearer $API_TOKEN`. See "Fork additions" below.
+
 ## Features
 
 - Convert files to different formats
 - Process multiple files at once
 - Password protection
 - Multiple accounts
+- REST API + native MCP endpoint (fork additions, hermes-gadget — see below)
+
+## Fork additions (hermes-gadget)
+
+This fork adds a first-class REST API and a native MCP endpoint so agents can
+convert files without driving the web UI; upstream is kept as a normal git
+remote and synced by merge. Everything below is additive — the web UI works
+exactly as upstream.
+
+### REST API (`/api/v1`)
+
+All routes except `health` require `Authorization: Bearer $API_TOKEN`
+(`x-api-key` also accepted). The API is disabled entirely when `API_TOKEN` is
+unset. Jobs run under a dedicated internal user and results appear on disk the
+same way UI conversions do.
+
+- `GET /api/v1/health` — status + version
+- `GET /api/v1/targets?fileType=svg` — possible targets for a source type
+- `GET /api/v1/converters[?name=resvg]` — converter inventory
+- `POST /api/v1/convert` — multipart: `file` (one or more) + `convert_to`; add `wait=false` to return immediately
+- `POST /api/v1/convert/b64` — JSON: `{filename, content_b64, convert_to, wait?}`
+- `GET /api/v1/jobs/:jobId` — job + per-file statuses
+- `GET /api/v1/jobs/:jobId/files/:fileName` — download a result
+
+### MCP (`/mcp`)
+
+Streamable HTTP (stateful sessions), same bearer token. Tools: `convert`,
+`list_targets`, `list_converters`, `job_status`, `fetch_result`, `health`.
+Small outputs are returned inline as base64.
+
+### Fork env additions
+
+| Variable                | Default              | Purpose                                                     |
+| ----------------------- | -------------------- | ----------------------------------------------------------- |
+| `API_TOKEN`             | (unset)              | Bearer token(s), comma-separated. Unset disables API + MCP. |
+| `API_USER_EMAIL`        | `api@convertx.local` | Internal service user that owns API/MCP jobs.               |
+| `API_MAX_UPLOAD_MB`     | `512`                | Upload cap for multipart and inline base64 requests.        |
+| `API_SYNC_WAIT_SECONDS` | `600`                | Max wait before sync conversions return as still-running.   |
 
 ## Converters supported
 

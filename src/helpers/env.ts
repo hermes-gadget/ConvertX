@@ -27,3 +27,18 @@ export const UNAUTHENTICATED_USER_SHARING =
   process.env.UNAUTHENTICATED_USER_SHARING?.toLowerCase() === "true" || false;
 
 export const TIMEZONE = process.env.TZ || undefined;
+
+// Fork additions (hermes-gadget): REST API + MCP endpoint
+export const API_TOKEN = process.env.API_TOKEN ?? "";
+
+export const API_USER_EMAIL = process.env.API_USER_EMAIL ?? "api@convertx.local";
+
+export const API_MAX_UPLOAD_MB =
+  process.env.API_MAX_UPLOAD_MB && Number(process.env.API_MAX_UPLOAD_MB) > 0
+    ? Number(process.env.API_MAX_UPLOAD_MB)
+    : 512;
+
+export const API_SYNC_WAIT_SECONDS =
+  process.env.API_SYNC_WAIT_SECONDS && Number(process.env.API_SYNC_WAIT_SECONDS) > 0
+    ? Number(process.env.API_SYNC_WAIT_SECONDS)
+    : 600;

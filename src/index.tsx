@@ -18,9 +18,11 @@ import { root } from "./pages/root";
 import { upload } from "./pages/upload";
 import { user } from "./pages/user";
 import { healthcheck } from "./pages/healthcheck";
+import { api } from "./pages/api";
+import { mcp } from "./pages/mcp";
+import { uploadsDir, outputDir } from "./helpers/dirs";
 
-export const uploadsDir = "./data/uploads/";
-export const outputDir = "./data/output/";
+export { uploadsDir, outputDir };
 
 // Fix for Elysia issue with Bun, (see https://github.com/oven-sh/bun/issues/12161)
 process.getBuiltinModule = require;
@@ -50,6 +52,8 @@ const app = new Elysia({
   .use(listConverters)
   .use(chooseConverter)
   .use(healthcheck)
+  .use(api)
+  .use(mcp)
   .onError(({ error, code, request }) => {
     if (code === "NOT_FOUND") {
       console.warn(`404: ${request.method} ${new URL(request.url).pathname}`);

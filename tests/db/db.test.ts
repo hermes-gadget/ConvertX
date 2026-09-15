@@ -98,10 +98,12 @@ afterEach(() => {
 });
 
 afterAll(() => {
-  // Close the module-level default database before cleanup to prevent file lock errors
-  if (defaultDb) {
-    defaultDb.close();
-  }
+  // NOTE (hermes-gadget fork): do NOT close the shared module-level database
+  // here. Closing it made the whole test suite order-dependent: any file that
+  // ran afterwards (e.g. tests/converters/main.test.ts) failed with
+  // "Cannot use a closed database". The process exit closes the handle, and
+  // Linux unlink works fine on open files.
+  // (Removed: if (defaultDb) { defaultDb.close(); })
   // Cleanup of the isolated test database after the test run
   if (existsSync("./data/test-isolated.sqlite")) {
     unlinkSync("./data/test-isolated.sqlite");

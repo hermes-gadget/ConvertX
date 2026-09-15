@@ -21,9 +21,11 @@
     "@elysiajs/jwt": "^1.4.2",
     "@elysiajs/static": "^1.4.10",
     "@kitajs/html": "^4.2.13",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "elysia": "1.4.30",
     "sanitize-filename": "^1.6.4",
-    "tar": "^7.5.22"
+    "tar": "^7.5.22",
+    "zod": "^4.6.5"
   },
   "module": "src/index.tsx",
   "type": "module",
