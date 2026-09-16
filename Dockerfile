@@ -52,6 +52,7 @@ RUN apt-get update && apt-get install -y \
   dcraw \
   dvisvgm \
   ffmpeg \
+  fonts-dejavu-core \
   ghostscript \
   graphicsmagick \
   imagemagick-7.q16 \
@@ -59,6 +60,7 @@ RUN apt-get update && apt-get install -y \
   latexmk \
   libheif-examples \
   libjxl-tools \
+  librsvg2-bin \
   libreoffice \
   libva2 \
   libvips-tools \
