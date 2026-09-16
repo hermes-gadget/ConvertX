@@ -245,54 +245,49 @@ export const api = new Elysia()
       }),
     },
   )
-  .all("/api/v1/uploads/:uploadId", async ({ request, params, body, set }) => {
-    const slot = getSlot(params.uploadId);
-    if (!slot) {
-      set.status = 404;
-      return { ok: false, error: "upload not found or expired" };
-    }
-    const url = new URL(request.url);
-    const tokenOk = tokenMatches(slot, url.searchParams.get("token") ?? "");
-    const bearerOk = apiEnabled() && checkApiToken(request);
-    if (!tokenOk && !bearerOk) return unauthorized(set);
-    if (request.method !== "PUT" && request.method !== "POST") {
-      set.status = 405;
-      return { ok: false, error: "method not allowed" };
-    }
-    const declared = Number(request.headers.get("content-length") ?? 0);
-    if (declared > maxBytes()) {
-      set.status = 413;
-      return { ok: false, error: `upload exceeds API_MAX_UPLOAD_MB (${API_MAX_UPLOAD_MB})` };
-    }
-    const contentType = request.headers.get("content-type") ?? "";
-    const maybeFile = (body as { file?: File | File[] } | undefined)?.file;
-    let wrote: number;
-    if (body instanceof ArrayBuffer) {
-      wrote = await Bun.write(slot.path, body);
-    } else if (ArrayBuffer.isView(body)) {
-      wrote = await Bun.write(slot.path, body as unknown as Uint8Array);
-    } else if (typeof body === "string") {
-      wrote = await Bun.write(slot.path, body);
-    } else if (contentType.includes("multipart/form-data") && maybeFile) {
-      const file = Array.isArray(maybeFile) ? maybeFile[0] : maybeFile;
-      if (!file) {
-        set.status = 400;
-        return { ok: false, error: "no file field" };
+  .all(
+    "/api/v1/uploads/:uploadId",
+    async ({ request, params, set }) => {
+      const slot = getSlot(params.uploadId);
+      if (!slot) {
+        set.status = 404;
+        return { ok: false, error: "upload not found or expired" };
       }
-      wrote = await Bun.write(slot.path, file);
-    } else {
-      wrote = await Bun.write(slot.path, request as unknown as Response);
-    }
-    if (wrote === 0) {
-      set.status = 400;
-      return { ok: false, error: "empty upload body" };
-    }
-    if (wrote > maxBytes()) {
-      set.status = 413;
-      return { ok: false, error: `upload exceeds API_MAX_UPLOAD_MB (${API_MAX_UPLOAD_MB})` };
-    }
-    return { ok: true, upload_id: slot.id, filename: slot.filename, size: wrote };
-  })
+      const url = new URL(request.url);
+      const tokenOk = tokenMatches(slot, url.searchParams.get("token") ?? "");
+      const bearerOk = apiEnabled() && checkApiToken(request);
+      if (!tokenOk && !bearerOk) return unauthorized(set);
+      if (request.method !== "PUT" && request.method !== "POST") {
+        set.status = 405;
+        return { ok: false, error: "method not allowed" };
+      }
+      const declared = Number(request.headers.get("content-length") ?? 0);
+      if (declared > maxBytes()) {
+        set.status = 413;
+        return { ok: false, error: `upload exceeds API_MAX_UPLOAD_MB (${API_MAX_UPLOAD_MB})` };
+      }
+      let wrote: number;
+      try {
+        // `parse: "none"` on this route keeps the raw request stream intact for
+        // ANY content type — curl --data-binary defaults to urlencoded, which
+        // Elysia's eager parser would otherwise consume ("Body already used").
+        wrote = await Bun.write(slot.path, request as unknown as Response);
+      } catch (error) {
+        set.status = 400;
+        return { ok: false, error: `could not read upload body: ${String(error)}` };
+      }
+      if (wrote === 0) {
+        set.status = 400;
+        return { ok: false, error: "empty upload body" };
+      }
+      if (wrote > maxBytes()) {
+        set.status = 413;
+        return { ok: false, error: `upload exceeds API_MAX_UPLOAD_MB (${API_MAX_UPLOAD_MB})` };
+      }
+      return { ok: true, upload_id: slot.id, filename: slot.filename, size: wrote };
+    },
+    { parse: "none" },
+  )
   .post(
     "/api/v1/convert/upload",
     async ({ request, body, set }) => {

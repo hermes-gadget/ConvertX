@@ -51,7 +51,7 @@ same way UI conversions do.
 - `GET /api/v1/jobs/:jobId` — job + per-file statuses (each file carries an absolute `download_url` when present)
 - `GET /api/v1/jobs/:jobId/files/:fileName` — download a result
 - `POST /api/v1/uploads` — create an upload slot: `{filename}` → `{upload_id, upload_url, expires_at}`
-- `PUT /api/v1/uploads/:id` — PUT raw bytes to the slot (`curl --data-binary @file '<upload_url>'`); multipart `file` also accepted
+- `PUT /api/v1/uploads/:id` — PUT raw bytes to the slot (`curl --data-binary @file '<upload_url>'`; raw bytes only)
 - `POST /api/v1/convert/upload` — convert a staged upload: `{upload_url | upload_id, convert_to, wait?}`
 
 ### MCP (`/mcp`)

@@ -120,7 +120,15 @@ test("upload flow: request slot, PUT bytes, convert, download_url present", asyn
   // vcf->csv is a pure-TypeScript converter, so this happy path runs
   // everywhere (no external binaries needed), unlike resvg-based targets.
   const vcf = "BEGIN:VCARD\nVERSION:3.0\nFN:Flow Test\nN:Test;Flow;;;\nEND:VCARD\n";
-  const upRes = await app.handle(new Request(slot.upload_url, { method: "PUT", body: vcf }));
+  const upRes = await app.handle(
+    new Request(slot.upload_url, {
+      method: "PUT",
+      // urlencoded is curl --data-binary's default content type — regression
+      // guard for the eager-parse bug ("Body already used").
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: vcf,
+    }),
+  );
   expect(upRes.status).toBe(200);
   const up = (await upRes.json()) as { ok: boolean; size: number };
   expect(up.ok).toBe(true);
