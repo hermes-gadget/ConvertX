@@ -3,6 +3,7 @@ import sanitize from "sanitize-filename";
 import { version } from "../../package.json";
 import { checkApiToken, apiEnabled } from "../api/auth";
 import {
+  convertFromUpload,
   createJob,
   ensureApiUserId,
   fileResults,
@@ -11,6 +12,14 @@ import {
   startConversion,
   waitForJob,
 } from "../api/service";
+import {
+  createSlot,
+  expiresAtFor,
+  getSlot,
+  tokenMatches,
+  uploadIdFromUrl,
+  uploadUrlFor,
+} from "../api/uploads";
 import { getAllInputs, getAllTargets, getPossibleTargets } from "../converters/main";
 import { outputDir } from "../helpers/dirs";
 import { API_MAX_UPLOAD_MB, API_SYNC_WAIT_SECONDS } from "../helpers/env";
@@ -214,4 +223,119 @@ export const api = new Elysia()
     }
     set.headers["content-disposition"] = `attachment; filename="${fileName}"`;
     return bunFile;
-  });
+  })
+  .post(
+    "/api/v1/uploads",
+    ({ request, body, set }) => {
+      if (!guard(request, set)) return unauthorized(set);
+      const { filename } = body as unknown as { filename: string };
+      const slot = createSlot(sanitize(filename) || "upload.bin");
+      return {
+        ok: true,
+        upload_id: slot.id,
+        upload_url: uploadUrlFor(slot),
+        expires_at: expiresAtFor(slot),
+        max_bytes: maxBytes(),
+      };
+    },
+    {
+      body: t.Object({
+        filename: t.String(),
+        size_bytes: t.Optional(t.Number()),
+      }),
+    },
+  )
+  .all("/api/v1/uploads/:uploadId", async ({ request, params, body, set }) => {
+    const slot = getSlot(params.uploadId);
+    if (!slot) {
+      set.status = 404;
+      return { ok: false, error: "upload not found or expired" };
+    }
+    const url = new URL(request.url);
+    const tokenOk = tokenMatches(slot, url.searchParams.get("token") ?? "");
+    const bearerOk = apiEnabled() && checkApiToken(request);
+    if (!tokenOk && !bearerOk) return unauthorized(set);
+    if (request.method !== "PUT" && request.method !== "POST") {
+      set.status = 405;
+      return { ok: false, error: "method not allowed" };
+    }
+    const declared = Number(request.headers.get("content-length") ?? 0);
+    if (declared > maxBytes()) {
+      set.status = 413;
+      return { ok: false, error: `upload exceeds API_MAX_UPLOAD_MB (${API_MAX_UPLOAD_MB})` };
+    }
+    const contentType = request.headers.get("content-type") ?? "";
+    const maybeFile = (body as { file?: File | File[] } | undefined)?.file;
+    let wrote: number;
+    if (body instanceof ArrayBuffer) {
+      wrote = await Bun.write(slot.path, body);
+    } else if (ArrayBuffer.isView(body)) {
+      wrote = await Bun.write(slot.path, body as unknown as Uint8Array);
+    } else if (typeof body === "string") {
+      wrote = await Bun.write(slot.path, body);
+    } else if (contentType.includes("multipart/form-data") && maybeFile) {
+      const file = Array.isArray(maybeFile) ? maybeFile[0] : maybeFile;
+      if (!file) {
+        set.status = 400;
+        return { ok: false, error: "no file field" };
+      }
+      wrote = await Bun.write(slot.path, file);
+    } else {
+      wrote = await Bun.write(slot.path, request as unknown as Response);
+    }
+    if (wrote === 0) {
+      set.status = 400;
+      return { ok: false, error: "empty upload body" };
+    }
+    if (wrote > maxBytes()) {
+      set.status = 413;
+      return { ok: false, error: `upload exceeds API_MAX_UPLOAD_MB (${API_MAX_UPLOAD_MB})` };
+    }
+    return { ok: true, upload_id: slot.id, filename: slot.filename, size: wrote };
+  })
+  .post(
+    "/api/v1/convert/upload",
+    async ({ request, body, set }) => {
+      if (!guard(request, set)) return unauthorized(set);
+      const { upload_url, upload_id, convert_to, wait } = body as unknown as {
+        upload_url?: string;
+        upload_id?: string;
+        convert_to: string;
+        wait?: string;
+      };
+      const id = upload_id ?? (upload_url ? uploadIdFromUrl(upload_url) : null);
+      if (!id) {
+        set.status = 400;
+        return { ok: false, error: "upload_url or upload_id is required" };
+      }
+      const slot = getSlot(id);
+      if (!slot) {
+        set.status = 404;
+        return { ok: false, error: "upload not found or expired" };
+      }
+      if (!(await Bun.file(slot.path).exists())) {
+        set.status = 409;
+        return {
+          ok: false,
+          error: "upload not completed yet - PUT the bytes to the upload_url first",
+        };
+      }
+      const shouldWait = !(wait === "false" || wait === "0" || wait === "no");
+      const result = await convertFromUpload(
+        slot,
+        convert_to,
+        shouldWait,
+        API_SYNC_WAIT_SECONDS,
+        false,
+      );
+      return { ok: true, numFiles: 1, jobId: result.jobId, done: result.done, files: result.files };
+    },
+    {
+      body: t.Object({
+        upload_url: t.Optional(t.String()),
+        upload_id: t.Optional(t.String()),
+        convert_to: t.String(),
+        wait: t.Optional(t.String()),
+      }),
+    },
+  );

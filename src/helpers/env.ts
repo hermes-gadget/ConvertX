@@ -42,3 +42,10 @@ export const API_SYNC_WAIT_SECONDS =
   process.env.API_SYNC_WAIT_SECONDS && Number(process.env.API_SYNC_WAIT_SECONDS) > 0
     ? Number(process.env.API_SYNC_WAIT_SECONDS)
     : 600;
+
+export const API_UPLOAD_TTL_MINUTES =
+  process.env.API_UPLOAD_TTL_MINUTES && Number(process.env.API_UPLOAD_TTL_MINUTES) > 0
+    ? Number(process.env.API_UPLOAD_TTL_MINUTES)
+    : 1440;
+
+export const EXTERNAL_BASE_URL = (process.env.EXTERNAL_BASE_URL ?? "").replace(/\/+$/, "");

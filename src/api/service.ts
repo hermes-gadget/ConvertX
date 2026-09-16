@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { copyFileSync, mkdirSync } from "node:fs";
 import sanitize from "sanitize-filename";
 import type { Cookie } from "elysia";
 import { outputDir, uploadsDir } from "../helpers/dirs";
@@ -6,7 +6,8 @@ import db from "../db/db";
 import { Filename, Jobs, User } from "../db/types";
 import { handleConvert } from "../converters/main";
 import { normalizeFiletype } from "../helpers/normalizeFiletype";
-import { API_USER_EMAIL } from "../helpers/env";
+import { API_USER_EMAIL, EXTERNAL_BASE_URL } from "../helpers/env";
+import type { UploadSlot } from "./uploads";
 
 /** Max size of a file returned inline (base64) by the API/MCP. */
 const MAX_INLINE_B64_BYTES = 5 * 1024 * 1024;
@@ -37,6 +38,7 @@ export interface ConversionFileResult {
   output: string;
   status: string;
   size?: number;
+  download_url?: string;
   content_b64?: string;
 }
 
@@ -115,6 +117,27 @@ export function startConversion(
     });
 }
 
+/** Convert a file previously uploaded to a staging slot (two-step upload flow). */
+export async function convertFromUpload(
+  slot: UploadSlot,
+  convertToRaw: string,
+  wait: boolean,
+  timeoutS: number,
+  withContent: boolean,
+): Promise<{ jobId: number; done: boolean; files: ConversionFileResult[] }> {
+  const userId = ensureApiUserId();
+  const jobId = createJob(userId, 1);
+  const safe = sanitize(slot.filename) || "upload.bin";
+  const dir = `${uploadsDir}${userId}/${jobId}/`;
+  mkdirSync(dir, { recursive: true });
+  copyFileSync(slot.path, `${dir}${safe}`);
+  startConversion(userId, jobId, [safe], convertToRaw);
+  const done = wait ? await waitForJob(jobId, timeoutS * 1000) : false;
+  const res = jobWithFiles(userId, jobId);
+  const files = res ? await fileResults(userId, jobId, res.files, withContent) : [];
+  return { jobId, done, files };
+}
+
 /** Poll until all of the job's files have a terminal status row (or timeout). */
 export async function waitForJob(jobId: number, timeoutMs: number): Promise<boolean> {
   const expected =
@@ -153,6 +176,7 @@ export async function fileResults(
     };
     if (await bunFile.exists()) {
       entry.size = bunFile.size;
+      entry.download_url = `${EXTERNAL_BASE_URL}/api/v1/jobs/${jobId}/files/${encodeURIComponent(f.output_file_name)}`;
       if (withContent && bunFile.size <= MAX_INLINE_B64_BYTES) {
         entry.content_b64 = Buffer.from(await bunFile.arrayBuffer()).toString("base64");
       }

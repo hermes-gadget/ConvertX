@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { Elysia } from "elysia";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -7,6 +8,7 @@ import sanitize from "sanitize-filename";
 import { version } from "../../package.json";
 import { apiEnabled, checkApiToken } from "../api/auth";
 import {
+  convertFromUpload,
   createJob,
   ensureApiUserId,
   fileResults,
@@ -15,6 +17,7 @@ import {
   startConversion,
   waitForJob,
 } from "../api/service";
+import { createSlot, expiresAtFor, getSlot, uploadIdFromUrl, uploadUrlFor } from "../api/uploads";
 import { getAllInputs, getAllTargets, getPossibleTargets } from "../converters/main";
 import { API_MAX_UPLOAD_MB } from "../helpers/env";
 
@@ -32,13 +35,56 @@ function buildServer(): McpServer {
   const server = new McpServer({ name: "convertx", version });
 
   server.registerTool(
+    "request_upload",
+    {
+      description:
+        "Step 1 of the two-step upload flow (preferred over inline base64 for anything but tiny files): create an upload slot and return an upload_url. Step 2: PUT the raw file bytes to that URL (e.g. curl --data-binary @file '<upload_url>'). Step 3: call convert with the same upload_url. Slots are reusable within their TTL.",
+      inputSchema: {
+        filename: z.string().describe("file name including extension, e.g. clip.mp4"),
+        size_bytes: z
+          .number()
+          .optional()
+          .describe("optional declared file size for early validation"),
+      },
+    },
+    async ({ filename, size_bytes }) => {
+      if (size_bytes !== undefined && size_bytes > API_MAX_UPLOAD_MB * 1024 * 1024) {
+        return textResult({
+          ok: false,
+          error: `declared size exceeds API_MAX_UPLOAD_MB (${API_MAX_UPLOAD_MB})`,
+        });
+      }
+      const slot = createSlot(sanitize(filename) || "upload.bin");
+      return textResult({
+        ok: true,
+        upload_id: slot.id,
+        upload_url: uploadUrlFor(slot),
+        expires_at: expiresAtFor(slot),
+        max_bytes: API_MAX_UPLOAD_MB * 1024 * 1024,
+        hint: "PUT the raw bytes to upload_url, then call convert with upload_url",
+      });
+    },
+  );
+
+  server.registerTool(
     "convert",
     {
       description:
-        "Convert a file to a target format. Provide the file inline as base64. Returns the job id and, when wait is true (default), the finished outputs (small files are inlined as base64).",
+        "Convert a file to a target format. Provide the source either inline (content_b64 + filename, small files only) or via the upload flow (request_upload -> PUT bytes -> pass upload_url here; preferred for anything large). Returns the job id and, when wait is true (default), the finished outputs with download_url (small files also inlined as base64).",
       inputSchema: {
-        filename: z.string().describe("source file name including extension, e.g. hello.svg"),
-        content_b64: z.string().describe("base64-encoded source file content"),
+        filename: z
+          .string()
+          .optional()
+          .describe("source file name including extension (required with content_b64)"),
+        content_b64: z
+          .string()
+          .optional()
+          .describe("inline base64 content - small files only; prefer request_upload"),
+        upload_url: z
+          .string()
+          .optional()
+          .describe("upload_url from request_upload (preferred for large files)"),
+        upload_id: z.string().optional().describe("upload_id from request_upload"),
         target: z
           .string()
           .describe('target format as "format" or "format,converter", e.g. "png" or "png,resvg"'),
@@ -46,13 +92,42 @@ function buildServer(): McpServer {
         timeout_s: z.number().optional().describe("maximum seconds to wait (default 300)"),
       },
     },
-    async ({ filename, content_b64, target, wait, timeout_s }) => {
+    async ({ filename, content_b64, upload_url, upload_id, target, wait, timeout_s }) => {
+      const uploadSource = upload_url ?? upload_id;
+      if (content_b64 && uploadSource) {
+        return textResult({
+          ok: false,
+          error: "provide only one source: content_b64 OR upload_url/upload_id",
+        });
+      }
+
+      if (uploadSource !== undefined && uploadSource !== "") {
+        const id = upload_id ?? (upload_url ? uploadIdFromUrl(upload_url) : null);
+        const slot = id ? getSlot(id) : null;
+        if (!slot) return textResult({ ok: false, error: "upload not found or expired" });
+        if (!existsSync(slot.path)) {
+          return textResult({
+            ok: false,
+            error: "upload not completed yet - PUT the raw bytes to the upload_url first",
+          });
+        }
+        const res = await convertFromUpload(slot, target, wait !== false, timeout_s ?? 300, true);
+        return textResult({ ok: true, ...res });
+      }
+
+      if (!content_b64 || !filename) {
+        return textResult({
+          ok: false,
+          error: "provide content_b64 + filename, or upload_url/upload_id from request_upload",
+        });
+      }
+
       const data = Buffer.from(content_b64, "base64");
       if (data.length === 0) return textResult({ ok: false, error: "empty content" });
       if (data.length > API_MAX_UPLOAD_MB * 1024 * 1024) {
         return textResult({
           ok: false,
-          error: `file exceeds the inline cap (API_MAX_UPLOAD_MB=${API_MAX_UPLOAD_MB}); use the REST API for large files`,
+          error: `file exceeds the inline cap (API_MAX_UPLOAD_MB=${API_MAX_UPLOAD_MB}); use request_upload instead`,
         });
       }
 

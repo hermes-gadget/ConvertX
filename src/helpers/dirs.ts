@@ -2,3 +2,4 @@
 // import them without pulling in the app entrypoint (needed for API/MCP tests).
 export const uploadsDir = "./data/uploads/";
 export const outputDir = "./data/output/";
+export const apiUploadsDir = "./data/api-uploads/";

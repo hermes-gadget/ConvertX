@@ -48,14 +48,21 @@ same way UI conversions do.
 - `GET /api/v1/converters[?name=resvg]` — converter inventory
 - `POST /api/v1/convert` — multipart: `file` (one or more) + `convert_to`; add `wait=false` to return immediately
 - `POST /api/v1/convert/b64` — JSON: `{filename, content_b64, convert_to, wait?}`
-- `GET /api/v1/jobs/:jobId` — job + per-file statuses
+- `GET /api/v1/jobs/:jobId` — job + per-file statuses (each file carries an absolute `download_url` when present)
 - `GET /api/v1/jobs/:jobId/files/:fileName` — download a result
+- `POST /api/v1/uploads` — create an upload slot: `{filename}` → `{upload_id, upload_url, expires_at}`
+- `PUT /api/v1/uploads/:id` — PUT raw bytes to the slot (`curl --data-binary @file '<upload_url>'`); multipart `file` also accepted
+- `POST /api/v1/convert/upload` — convert a staged upload: `{upload_url | upload_id, convert_to, wait?}`
 
 ### MCP (`/mcp`)
 
-Streamable HTTP (stateful sessions), same bearer token. Tools: `convert`,
-`list_targets`, `list_converters`, `job_status`, `fetch_result`, `health`.
-Small outputs are returned inline as base64.
+Streamable HTTP (stateful sessions), same bearer token. Tools: `request_upload`,
+`convert`, `list_targets`, `list_converters`, `job_status`, `fetch_result`, `health`.
+
+Preferred file flow (mirrors the GPU gateway two-step pattern): `request_upload`
+→ PUT the raw bytes to the returned `upload_url` → call `convert` with the same
+`upload_url`. Nothing large travels through tool arguments. Result files carry
+an absolute `download_url`; small files are also inlined as base64.
 
 ### Fork env additions
 
@@ -63,8 +70,10 @@ Small outputs are returned inline as base64.
 | ----------------------- | -------------------- | ----------------------------------------------------------- |
 | `API_TOKEN`             | (unset)              | Bearer token(s), comma-separated. Unset disables API + MCP. |
 | `API_USER_EMAIL`        | `api@convertx.local` | Internal service user that owns API/MCP jobs.               |
-| `API_MAX_UPLOAD_MB`     | `512`                | Upload cap for multipart and inline base64 requests.        |
-| `API_SYNC_WAIT_SECONDS` | `600`                | Max wait before sync conversions return as still-running.   |
+| `API_MAX_UPLOAD_MB`     | `512`                | Upload cap for multipart, staged uploads and inline base64 requests. |
+| `API_SYNC_WAIT_SECONDS` | `600`                | Max wait before sync conversions return as still-running.      |
+| `API_UPLOAD_TTL_MINUTES`| `1440`               | Lifetime of upload slots (reusable within it, swept after).    |
+| `EXTERNAL_BASE_URL`     | (empty)              | Absolute base used in `upload_url` / `download_url`, e.g. `http://host:3333`. |
 
 ## Converters supported
 
